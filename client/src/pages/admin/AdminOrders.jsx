@@ -1,18 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, RefreshCw } from 'lucide-react';
 import api from '../../services/api';
+import socket from '../../services/socket';
 import toast from 'react-hot-toast';
 
 const STATUS_OPTIONS = ['pending', 'preparing', 'ready', 'completed'];
-const STATUS_COLORS = { pending: 'badge-warning', preparing: 'badge-info', ready: 'badge-success', completed: 'badge-primary' };
-const STATUS_LABELS = { pending: 'Pending', preparing: 'Preparing', ready: 'Ready for Pickup', completed: 'Completed' };
+const STATUS_COLORS  = { pending: 'badge-warning', preparing: 'badge-info', ready: 'badge-success', completed: 'badge-primary' };
+const STATUS_LABELS  = { pending: 'Pending', preparing: 'Preparing', ready: 'Ready for Pickup', completed: 'Completed' };
 
 export default function AdminOrders() {
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [orders, setOrders]           = useState([]);
+  const [loading, setLoading]         = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
-  const [expandedId, setExpandedId] = useState(null);
-  const [updating, setUpdating] = useState(null);
+  const [expandedId, setExpandedId]   = useState(null);
+  const [updating, setUpdating]       = useState(null);
+  const intervalRef                   = useRef(null);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -23,14 +25,51 @@ export default function AdminOrders() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchOrders(); }, [filterStatus]);
+  useEffect(() => {
+    fetchOrders();
+  }, [filterStatus]);
+
+  useEffect(() => {
+    // ── Real-time: when any order status changes, update the row instantly ──
+    const handleOrderUpdated = ({ orderId, status }) => {
+      setOrders(prev =>
+        prev.map(o => o._id === orderId ? { ...o, status } : o)
+      );
+    };
+
+    // ── When a NEW order comes in, refetch so admin sees it immediately ──
+    const handleNewOrder = () => {
+      fetchOrders();
+      toast('🛒 New order received!', { icon: '🔔' });
+    };
+
+    socket.on('order:updated', handleOrderUpdated);
+    socket.on('order:new',     handleNewOrder);
+
+    // Fallback: poll every 30s
+    intervalRef.current = setInterval(fetchOrders, 30000);
+
+    // Refetch when admin switches back to this tab
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchOrders();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      socket.off('order:updated', handleOrderUpdated);
+      socket.off('order:new',     handleNewOrder);
+      clearInterval(intervalRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const updateStatus = async (orderId, status) => {
     setUpdating(orderId);
     try {
       await api.put(`/orders/admin/${orderId}/status`, { status });
       toast.success(`Order status → ${STATUS_LABELS[status]}`);
-      fetchOrders();
+      // Optimistically update locally (socket will also confirm)
+      setOrders(prev => prev.map(o => o._id === orderId ? { ...o, status } : o));
     } catch { toast.error('Failed to update status'); }
     finally { setUpdating(null); }
   };
@@ -45,7 +84,7 @@ export default function AdminOrders() {
             <option value="">All Statuses</option>
             {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
           </select>
-          <button onClick={fetchOrders} className="p-2.5 rounded-xl border border-gray-200 hover:border-primary hover:text-primary transition-colors">
+          <button onClick={fetchOrders} className="p-2.5 rounded-xl border border-gray-200 hover:border-primary hover:text-primary transition-colors" title="Refresh">
             <RefreshCw size={16} />
           </button>
         </div>
@@ -77,9 +116,9 @@ export default function AdminOrders() {
                     <select value={order.status} disabled={updating === order._id}
                       onChange={e => updateStatus(order._id, e.target.value)}
                       className={`appearance-none pr-8 pl-4 py-2 rounded-xl text-xs font-bold border-2 cursor-pointer transition-all focus:outline-none
-                        ${order.status === 'pending' ? 'border-yellow-300 bg-yellow-50 text-yellow-700' :
+                        ${order.status === 'pending'   ? 'border-yellow-300 bg-yellow-50 text-yellow-700' :
                           order.status === 'preparing' ? 'border-blue-300 bg-blue-50 text-blue-700' :
-                          order.status === 'ready' ? 'border-green-300 bg-green-50 text-green-700' :
+                          order.status === 'ready'     ? 'border-green-300 bg-green-50 text-green-700' :
                           'border-gray-300 bg-gray-50 text-gray-600'}`}>
                       {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
                     </select>

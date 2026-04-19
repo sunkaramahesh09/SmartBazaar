@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Package, ShoppingBag, Store, Warehouse, TrendingUp, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Package, ShoppingBag, Store, AlertTriangle } from 'lucide-react';
 import api from '../../services/api';
+import socket from '../../services/socket';
 
 const StatCard = ({ icon: Icon, label, value, color, sub }) => (
   <div className="card p-6">
@@ -16,31 +17,60 @@ const StatCard = ({ icon: Icon, label, value, color, sub }) => (
 );
 
 export default function AdminDashboard() {
-  const [stats, setStats] = useState({ products: 0, orders: 0, stores: 0, lowStock: 0 });
+  const [stats, setStats]               = useState({ products: 0, orders: 0, stores: 0, lowStock: 0 });
   const [recentOrders, setRecentOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]           = useState(true);
+  const intervalRef                     = useRef(null);
+
+  const loadDashboard = async () => {
+    try {
+      const [products, orders, stores, inventory] = await Promise.all([
+        api.get('/products?limit=1'),
+        api.get('/orders/admin/all?limit=5'),
+        api.get('/stores'),
+        api.get('/inventory'),
+      ]);
+      const lowStock = (inventory.data.data || []).filter(i => i.currentStock <= i.threshold).length;
+      setStats({
+        products: products.data.pagination?.total || 0,
+        orders:   orders.data.pagination?.total   || 0,
+        stores:   (stores.data.data || []).length,
+        lowStock,
+      });
+      setRecentOrders(orders.data.data || []);
+    } catch {}
+    finally { setLoading(false); }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const [products, orders, stores, inventory] = await Promise.all([
-          api.get('/products?limit=1'),
-          api.get('/orders/admin/all?limit=5'),
-          api.get('/stores'),
-          api.get('/inventory'),
-        ]);
-        const lowStock = (inventory.data.data || []).filter(i => i.currentStock <= i.threshold).length;
-        setStats({
-          products: products.data.pagination?.total || 0,
-          orders: orders.data.pagination?.total || 0,
-          stores: (stores.data.data || []).length,
-          lowStock,
-        });
-        setRecentOrders(orders.data.data || []);
-      } catch {}
-      finally { setLoading(false); }
+    loadDashboard();
+
+    // ── Refresh recent orders list when any order status changes ──
+    const onOrderUpdated = ({ orderId, status }) => {
+      setRecentOrders(prev =>
+        prev.map(o => o._id === orderId ? { ...o, status } : o)
+      );
     };
-    load();
+    // ── Full reload when new order arrives (updates the orders count too) ──
+    const onOrderNew = () => loadDashboard();
+
+    socket.on('order:updated', onOrderUpdated);
+    socket.on('order:new',     onOrderNew);
+
+    // Fallback: poll every 30s
+    intervalRef.current = setInterval(loadDashboard, 30000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadDashboard();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      socket.off('order:updated', onOrderUpdated);
+      socket.off('order:new',     onOrderNew);
+      clearInterval(intervalRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const STATUS_COLORS = { pending: 'badge-warning', preparing: 'badge-info', ready: 'badge-success', completed: 'badge-primary' };
@@ -54,10 +84,10 @@ export default function AdminDashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-9">
-        <StatCard icon={Package}      label="Total Products" value={stats.products} color="bg-primary"      sub="Active listings" />
-        <StatCard icon={ShoppingBag}  label="Total Orders"   value={stats.orders}   color="bg-blue-500"    sub="All time" />
-        <StatCard icon={Store}        label="Stores"         value={stats.stores}   color="bg-green-500"   sub="Active locations" />
-        <StatCard icon={AlertTriangle} label="Low Stock"     value={stats.lowStock} color="bg-orange-500"  sub="Need restocking" />
+        <StatCard icon={Package}       label="Total Products" value={stats.products} color="bg-primary"     sub="Active listings" />
+        <StatCard icon={ShoppingBag}   label="Total Orders"   value={stats.orders}   color="bg-blue-500"    sub="All time" />
+        <StatCard icon={Store}         label="Stores"         value={stats.stores}   color="bg-green-500"   sub="Active locations" />
+        <StatCard icon={AlertTriangle} label="Low Stock"      value={stats.lowStock} color="bg-orange-500"  sub="Need restocking" />
       </div>
 
       {/* Recent Orders */}

@@ -42,6 +42,18 @@ exports.createOrder = async (req, res, next) => {
     });
 
     await order.populate('store', 'name address');
+
+    // Notify admin in real-time that a new order was placed
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('order:new', {
+        orderId: order._id,
+        token: order.token,
+        total: order.total,
+        status: order.status,
+      });
+    }
+
     res.status(201).json({ success: true, data: order });
   } catch (err) { next(err); }
 };
@@ -113,6 +125,19 @@ exports.updateOrderStatus = async (req, res, next) => {
     ).populate('store', 'name address').populate('user', 'name email');
 
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    // 🔴 Emit real-time event so ALL connected clients (user + admin) update instantly
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('order:updated', {
+        orderId: order._id.toString(),
+        status: order.status,
+        token: order.token,
+        userId: order.user?._id?.toString(),
+      });
+      console.log(`📡 Emitted order:updated for order ${order.token} → ${status}`);
+    }
+
     res.json({ success: true, data: order });
   } catch (err) { next(err); }
 };

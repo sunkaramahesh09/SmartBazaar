@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Package, Clock, CheckCircle, ChefHat, Store } from 'lucide-react';
 import api from '../services/api';
+import socket from '../services/socket';
 
 const STATUS_CONFIG = {
   pending:   { label: 'Pending',          color: 'badge-warning', icon: Clock,        step: 1 },
@@ -36,11 +37,44 @@ function StatusStepper({ status }) {
 export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const intervalRef = useRef(null);
+
+  const fetchOrders = async () => {
+    try {
+      const r = await api.get('/orders/my');
+      setOrders(r.data.data || []);
+    } catch {
+      // fail silently on background polls
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    api.get('/orders/my')
-      .then(r => setOrders(r.data.data || []))
-      .finally(() => setLoading(false));
+    fetchOrders();
+
+    // ── Real-time: instantly update when admin changes any order status ──
+    const handleOrderUpdated = ({ orderId, status }) => {
+      setOrders(prev =>
+        prev.map(o => o._id === orderId ? { ...o, status } : o)
+      );
+    };
+    socket.on('order:updated', handleOrderUpdated);
+
+    // ── Fallback polling every 20s (catches missed socket events) ──
+    intervalRef.current = setInterval(fetchOrders, 20000);
+
+    // ── Refetch instantly when user switches back to this tab ──
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchOrders();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      socket.off('order:updated', handleOrderUpdated);
+      clearInterval(intervalRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   if (loading) return (
@@ -76,7 +110,6 @@ export default function OrdersPage() {
                     <span className={`badge ${cfg.color} flex items-center gap-1.5`}>
                       <StatusIcon size={12} /> {cfg.label}
                     </span>
-                    {/* Token — visible to user */}
                     <div className="token-display text-white text-xl font-black tracking-widest rounded-xl px-4 py-1.5">
                       #{order.token}
                     </div>

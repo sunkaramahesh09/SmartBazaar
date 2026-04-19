@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Save, Loader, RefreshCw } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
@@ -15,7 +15,24 @@ export default function AdminInventory() {
     try { const r = await api.get('/inventory'); setInventory(r.data.data || []); }
     finally { setLoading(false); }
   };
-  useEffect(() => { fetch(); }, []);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    fetch();
+
+    // Auto-refresh every 30s so stock changes reflect without manual reload
+    intervalRef.current = setInterval(fetch, 30000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetch();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(intervalRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const setEdit = (id, field, value) =>
     setEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));

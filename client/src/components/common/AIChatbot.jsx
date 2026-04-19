@@ -206,9 +206,7 @@ export default function AIChatbot() {
       const formData = new FormData();
       formData.append('image', file);
 
-      const { data: res } = await api.post('/ai/extract', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const { data: res } = await api.post('/ai/extract', formData);
 
       if (res.success && res.data && res.data.length > 0) {
         setMessages(prev => [...prev, {

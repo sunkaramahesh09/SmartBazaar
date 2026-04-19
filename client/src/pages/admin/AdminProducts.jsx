@@ -27,7 +27,23 @@ export default function AdminProducts() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetch(); }, []);
+  useEffect(() => {
+    fetch();
+
+    // Auto-refresh every 30s so stock changes appear without manual reload
+    const interval = setInterval(fetch, 30000);
+
+    // Instantly refetch when admin switches back to this tab
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetch();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const openAdd = () => { setEditing(null); setForm(EMPTY); setImageFiles([]); setModal(true); };
   const openEdit = (p) => {
