@@ -39,6 +39,10 @@ const getRecipe = async (req, res) => {
 };
 
 // POST /api/ai/extract — forward image to recipifyai and return matched products
+// API contract (confirmed via Postman):
+//   field "file"    → the uploaded image file
+//   field "request" → JSON string: { "available_products": [...] }
+// Response: { "matched_products": [{ original_text, matched_product_name, confidence }] }
 const extractFromImage = async (req, res) => {
   try {
     if (!req.file)
@@ -46,25 +50,21 @@ const extractFromImage = async (req, res) => {
 
     const available_products = await getAvailableProducts();
 
-    // Build multipart/form-data exactly as the external API expects:
-    //   field "image"              → the uploaded file buffer
-    //   field "available_products" → JSON string of products array
-    //   field "user_request"       → plain text string
     const form = new FormData();
 
-    form.append('image', req.file.buffer, {
+    // ✅ Correct field name: "file" (not "image")
+    form.append('file', req.file.buffer, {
       filename: req.file.originalname || 'upload.jpg',
       contentType: req.file.mimetype || 'image/jpeg',
-      knownLength: req.file.buffer.length,   // ← required so form-data sets Content-Length correctly
+      knownLength: req.file.buffer.length,
     });
 
-    form.append('available_products', JSON.stringify(available_products));
-    form.append('user_request', 'Extract ingredients from image');
+    // ✅ Correct field name: "request" containing one JSON string with available_products
+    form.append('request', JSON.stringify({ available_products }));
 
     console.log('📸 Sending to AI extract API:', {
       filename: req.file.originalname,
       size: req.file.buffer.length,
-      mimeType: req.file.mimetype,
       productsCount: available_products.length,
     });
 
@@ -73,36 +73,47 @@ const extractFromImage = async (req, res) => {
       form,
       {
         headers: { ...form.getHeaders() },
-        timeout: 30000,            // vision models can be slow
+        timeout: 30000,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       }
     );
 
     const raw = aiRes.data;
-    console.log('✅ AI extract raw response:', JSON.stringify(raw).slice(0, 400));
+    console.log('✅ AI extract response:', JSON.stringify(raw).slice(0, 400));
 
-    // Handle whatever shape the API returns
-    let matched = [];
-    if (Array.isArray(raw))                      matched = raw;
-    else if (Array.isArray(raw?.products))       matched = raw.products;
-    else if (Array.isArray(raw?.data))           matched = raw.data;
-    else if (Array.isArray(raw?.matched_products)) matched = raw.matched_products;
-    else if (Array.isArray(raw?.ingredients))    matched = raw.ingredients;
-    else if (Array.isArray(raw?.results))        matched = raw.results;
+    // Response shape: { matched_products: [{ original_text, matched_product_name, confidence }] }
+    const matched = Array.isArray(raw?.matched_products) ? raw.matched_products : [];
 
-    // Attach _id from our DB so the cart "Add" button works
-    const enriched = matched.map(p => {
-      const local = available_products.find(
-        a => a.id === (p.id || p._id) || a.name.toLowerCase() === p.name?.toLowerCase()
-      );
-      return {
-        ...p,
-        _id: local?.id || p.id || p._id,
-        id:  local?.id || p.id || p._id,
-        images: [],
-      };
-    });
+    if (matched.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Map each matched product back to our real DB product (for price, _id, images etc.)
+    const enriched = matched
+      .map(m => {
+        // matched_product_name may be like "Potato (kg)" — find the closest product
+        const matchedName = (m.matched_product_name || m.original_text || '').toLowerCase();
+        const dbProduct = available_products.find(p =>
+          matchedName.includes(p.name.toLowerCase()) ||
+          p.name.toLowerCase().includes(matchedName.split(' ')[0])
+        );
+
+        if (!dbProduct) return null;
+
+        return {
+          _id: dbProduct.id,
+          id: dbProduct.id,
+          name: dbProduct.name,
+          price: dbProduct.price,
+          unit: dbProduct.unit,
+          stock: dbProduct.quantity,
+          images: [],
+          confidence: m.confidence,
+          original_text: m.original_text,
+        };
+      })
+      .filter(Boolean); // remove nulls (unmatched items)
 
     return res.json({ success: true, data: enriched });
   } catch (err) {
