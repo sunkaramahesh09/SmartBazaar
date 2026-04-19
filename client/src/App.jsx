@@ -3,6 +3,7 @@ import { useAuth } from './contexts/AuthContext';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import AIChatbot from './components/common/AIChatbot';
+import ScrollToTop from './components/common/ScrollToTop';
 
 // Pages
 import HomePage from './pages/HomePage';
@@ -38,6 +39,7 @@ const AdminRoute = ({ children }) => {
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
+      <ScrollToTop />
       <Routes>
         {/* Admin routes — no public Navbar/Footer */}
         <Route path="/admin/*" element={
