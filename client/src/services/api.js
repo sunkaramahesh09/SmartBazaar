@@ -4,7 +4,8 @@ import axios from 'axios';
 // In development, it's empty so Vite proxy handles '/api' locally.
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api',
-  headers: { 'Content-Type': 'application/json' },
+  // No default Content-Type — axios will auto-set multipart/form-data with the
+  // correct boundary when sending FormData, and application/json for plain objects.
 });
 
 // Attach JWT token to every request

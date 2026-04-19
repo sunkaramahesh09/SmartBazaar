@@ -7,7 +7,7 @@ const { sendLowStockAlert } = require('../utils/mailer');
 exports.getProducts = async (req, res, next) => {
   try {
     const { search, category, minPrice, maxPrice, featured, page = 1, limit = 12, sort = '-createdAt' } = req.query;
-    const query = { isActive: true };
+    const query = {};  // No isActive filter needed — deleted products are permanently removed
 
     if (search) query.$text = { $search: search };
     if (category) query.category = category;
@@ -45,7 +45,8 @@ exports.getProduct = async (req, res, next) => {
 // @route  POST /api/products
 exports.createProduct = async (req, res, next) => {
   try {
-    const images = req.files ? req.files.map(f => `/uploads/${f.filename}`) : [];
+    // multer-storage-cloudinary v4 uses f.path; some builds expose f.secure_url — handle both
+    const images = req.files ? req.files.map(f => f.secure_url || f.path) : [];
     const product = await Product.create({ ...req.body, images });
     await Inventory.create({ product: product._id, currentStock: product.stock, threshold: product.threshold });
     res.status(201).json({ success: true, data: product });
@@ -58,7 +59,8 @@ exports.updateProduct = async (req, res, next) => {
   try {
     let update = { ...req.body };
     if (req.files && req.files.length > 0) {
-      update.images = req.files.map(f => `/uploads/${f.filename}`);
+      // multer-storage-cloudinary v4 uses f.path; some builds expose f.secure_url — handle both
+      update.images = req.files.map(f => f.secure_url || f.path);
     }
     const product = await Product.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
@@ -85,8 +87,10 @@ exports.updateProduct = async (req, res, next) => {
 // @route  DELETE /api/products/:id
 exports.deleteProduct = async (req, res, next) => {
   try {
-    const product = await Product.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-    res.json({ success: true, message: 'Product removed' });
+    // Also remove the associated inventory record
+    await Inventory.deleteOne({ product: req.params.id });
+    res.json({ success: true, message: 'Product deleted permanently' });
   } catch (err) { next(err); }
 };

@@ -53,10 +53,10 @@ export default function AdminProducts() {
       imageFiles.forEach(f => fd.append('images', f));
 
       if (editing) {
-        await api.put(`/products/${editing._id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await api.put(`/products/${editing._id}`, fd);
         toast.success('Product updated!');
       } else {
-        await api.post('/products', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await api.post('/products', fd);
         toast.success('Product created!');
       }
       setModal(false); fetch();
