@@ -38,6 +38,10 @@ export default function AdminProducts() {
   };
 
   const save = async () => {
+    if (!form.name.trim()) return toast.error('Product name is required');
+    if (!form.price || Number(form.price) <= 0) return toast.error('Valid price is required');
+    if (form.stock === '' || form.stock === null) return toast.error('Stock is required');
+    if (!form.category) return toast.error('Please select a category first');
     setSaving(true);
     try {
       const fd = new FormData();
@@ -147,9 +151,13 @@ export default function AdminProducts() {
                 <select className="input-field" value={form.unit} onChange={set('unit')}>
                   {UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
               <div><label className="text-xs font-semibold text-gray-500 mb-1.5 block">CATEGORY *</label>
-                <select className="input-field" value={form.category} onChange={set('category')}>
-                  <option value="">Select category</option>
-                  {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}</select></div>
+                <select className={`input-field ${!form.category ? 'border-red-300 bg-red-50' : ''}`} value={form.category} onChange={set('category')}>
+                  <option value="">— Select category —</option>
+                  {categories.length === 0 && <option disabled>No categories found — run seed first</option>}
+                  {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+                </select>
+                {!form.category && <p className="text-xs text-red-500 mt-1">Category is required</p>}
+              </div>
               <div><label className="text-xs font-semibold text-gray-500 mb-1.5 block">BRAND</label>
                 <input className="input-field" value={form.brand} onChange={set('brand')} placeholder="Brand name" /></div>
               <div><label className="text-xs font-semibold text-gray-500 mb-1.5 block">TAGS (comma-separated)</label>
