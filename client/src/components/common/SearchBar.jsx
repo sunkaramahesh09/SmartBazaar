@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, Mic, Camera } from 'lucide-react';
-import { createWorker } from 'tesseract.js';
+import api from '../../services/api';
 
 export default function SearchBar({ className = '' }) {
   const [query, setQuery] = useState('');
   const [listening, setListening] = useState(false);
-  const [ocrLoading, setOcrLoading] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
   const navigate = useNavigate();
   const fileRef = useRef();
 
@@ -20,7 +20,7 @@ export default function SearchBar({ className = '' }) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return alert('Voice search not supported on this browser');
     const recognition = new SR();
-    recognition.lang = 'te-IN'; // Telugu first, falls back to English
+    recognition.lang = 'te-IN';
     recognition.interimResults = false;
     recognition.maxAlternatives = 3;
     setListening(true);
@@ -35,25 +35,36 @@ export default function SearchBar({ className = '' }) {
     recognition.onend = () => setListening(false);
   }, [navigate]);
 
-  // Image/OCR Search
+  // AI Image Search — replaces Tesseract OCR
   const handleImageSearch = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setOcrLoading(true);
+    e.target.value = '';
+    setImageLoading(true);
     try {
-      const worker = await createWorker('eng');
-      const { data: { text } } = await worker.recognize(file);
-      await worker.terminate();
-      const cleaned = text.replace(/[^a-zA-Z0-9 ]/g, ' ').trim();
-      if (cleaned) {
-        setQuery(cleaned);
-        navigate(`/products?search=${encodeURIComponent(cleaned)}`);
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const { data: res } = await api.post('/ai/extract', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      if (res.success && res.data && res.data.length > 0) {
+        // Navigate to products page with matched product IDs
+        const ids = res.data.map(p => p.id || p._id).filter(Boolean).join(',');
+        if (ids) {
+          navigate(`/products?ids=${ids}`);
+        } else {
+          // Fallback: search by name of first matched product
+          navigate(`/products?search=${encodeURIComponent(res.data[0].name)}`);
+        }
+      } else {
+        alert('No matching products found in this image. Try a clearer photo!');
       }
-    } catch (err) {
-      alert('Could not extract text from image');
+    } catch {
+      alert('Image analysis failed. Please try again.');
     } finally {
-      setOcrLoading(false);
-      e.target.value = '';
+      setImageLoading(false);
     }
   };
 
@@ -81,8 +92,8 @@ export default function SearchBar({ className = '' }) {
             <Mic size={16} />
           </button>
           <button type="button" onClick={() => fileRef.current?.click()}
-            className={`p-1.5 rounded-lg text-gray-400 hover:text-primary hover:bg-gray-100 transition-colors ${ocrLoading ? 'animate-pulse text-primary' : ''}`}
-            title="Image search">
+            className={`p-1.5 rounded-lg text-gray-400 hover:text-primary hover:bg-gray-100 transition-colors ${imageLoading ? 'animate-pulse text-primary' : ''}`}
+            title="AI Image search">
             <Camera size={16} />
           </button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageSearch} />

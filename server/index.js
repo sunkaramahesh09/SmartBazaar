@@ -25,6 +25,7 @@ app.use('/api/categories', require('./routes/category'));
 app.use('/api/stores', require('./routes/store'));
 app.use('/api/orders', require('./routes/order'));
 app.use('/api/inventory', require('./routes/inventory'));
+app.use('/api/ai', require('./routes/ai'));
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ success: true, message: 'Smart Bazaar API running 🚀' }));
